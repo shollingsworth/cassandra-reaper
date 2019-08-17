@@ -593,17 +593,16 @@ public final class PostgresStorage implements IStorage {
 
   @Override
   public Collection<DiagEventSubscription> getEventSubscriptions() {
-    return getEventSubscriptions(null);
+    try (Handle h = jdbi.open()) {
+      return getPostgresStorage(h).getEventSubscriptions();
+    }
   }
 
   @Override
   public Collection<DiagEventSubscription> getEventSubscriptions(String clusterName) {
+    Preconditions.checkNotNull(clusterName);
     try (Handle h = jdbi.open()) {
-      if (clusterName != null) {
-        return getPostgresStorage(h).getEventSubscriptions(clusterName);
-      } else {
-        return getPostgresStorage(h).getEventSubscriptions();
-      }
+      return getPostgresStorage(h).getEventSubscriptions(clusterName);
     }
   }
 

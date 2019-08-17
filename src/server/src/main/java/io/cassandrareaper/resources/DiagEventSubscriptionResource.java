@@ -21,10 +21,11 @@ import io.cassandrareaper.AppContext;
 import io.cassandrareaper.core.DiagEventSubscription;
 import io.cassandrareaper.service.DiagEventSubscriptionService;
 
-import java.util.Arrays;
+import java.net.URI;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ScheduledExecutorService;
 
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
@@ -33,9 +34,12 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriInfo;
 
+import com.google.common.collect.ImmutableSet;
 import org.apache.http.client.HttpClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,20 +54,25 @@ public final class DiagEventSubscriptionResource {
   private final AppContext context;
   private final DiagEventSubscriptionService diagEventService;
 
-  public DiagEventSubscriptionResource(AppContext context, HttpClient httpClient) {
+  public DiagEventSubscriptionResource(AppContext context, HttpClient httpClient, ScheduledExecutorService executor) {
     this.context = context;
-    this.diagEventService = DiagEventSubscriptionService.create(context, httpClient);
+    this.diagEventService = DiagEventSubscriptionService.create(context, httpClient, executor);
   }
 
   @GET
-  public Response getEventSubscriptionList(@QueryParam("clusterName") String clusterName) {
-    LOG.debug("get event subscriptions called");
-    Collection<DiagEventSubscription> subscriptions = context.storage.getEventSubscriptions(clusterName);
+  public Response getEventSubscriptionList(@QueryParam("clusterName") Optional<String> clusterName) {
+    LOG.debug("get event subscriptions called %s", clusterName);
+
+    Collection<DiagEventSubscription> subscriptions = clusterName.isPresent()
+        ? context.storage.getEventSubscriptions(clusterName.get())
+        : context.storage.getEventSubscriptions();
+
     return Response.ok().entity(subscriptions).build();
   }
 
   @POST
   public Response addEventSubscription(
+          @Context UriInfo uriInfo,
           @QueryParam("clusterName") String clusterName,
           @QueryParam("description") Optional<String> description,
           @QueryParam("nodes") String nodes,
@@ -76,8 +85,8 @@ public final class DiagEventSubscriptionResource {
         Optional.empty(),
         clusterName,
         description,
-        Arrays.asList(nodes == null ? new String[]{} : nodes.split(",")),
-        Arrays.asList(events == null ? new String[]{} : events.split(",")),
+        ImmutableSet.copyOf(nodes == null ? new String[]{} : nodes.split(",")),
+        ImmutableSet.copyOf(events == null ? new String[]{} : events.split(",")),
         exportSse,
         exportFileLogger,
         exportHttpEndpoint);
@@ -85,7 +94,13 @@ public final class DiagEventSubscriptionResource {
     LOG.debug("creating event subscription: {}", subscription);
     subscription = diagEventService.addEventSubscription(subscription);
 
-    return Response.ok().entity(subscription).build();
+    URI location = uriInfo.getBaseUriBuilder()
+        .path("diag_event")
+        .path("subscription")
+        .path(subscription.getId().get().toString())
+        .build();
+
+    return Response.created(location).build();
   }
 
   @GET
